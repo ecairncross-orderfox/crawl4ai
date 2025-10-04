@@ -328,32 +328,113 @@ Access the MCP tool schemas at `http://localhost:11235/mcp/schema` for detailed 
 
 ---
 
-## Additional API Endpoints
+## API Endpoints
 
-In addition to the core `/crawl` and `/crawl/stream` endpoints, the server provides several specialized endpoints:
+The Crawl4AI Docker server provides a comprehensive REST API with the following endpoints:
 
-### HTML Extraction Endpoint
+### Core Crawling Endpoints
 
+#### POST /crawl
+Standard crawling endpoint that processes one or more URLs and returns complete results.
+
+**Request:**
+```json
+{
+  "urls": ["https://example.com"],
+  "browser_config": {
+    "type": "BrowserConfig",
+    "params": {"headless": true}
+  },
+  "crawler_config": {
+    "type": "CrawlerRunConfig",
+    "params": {"cache_mode": "bypass"}
+  }
+}
 ```
-POST /html
+
+**Response:** JSON with crawl results including HTML, markdown, extracted data, screenshots, etc.
+
+#### POST /crawl/stream
+Streaming version that returns results as they complete (Server-Sent Events/NDJSON).
+
+**Request:** Same as `/crawl` but set `"stream": true` in crawler_config
+**Response:** Streaming NDJSON with individual results and completion marker
+
+### URL Discovery Endpoint
+
+#### POST /map
+Discovers and returns URLs from a website using sitemaps and/or CommonCrawl index.
+
+**Request:**
+```json
+{
+  "root": "example.com",
+  "limit": 1000,
+  "source": "sitemap+cc",
+  "pattern": "*",
+  "extract_head": false,
+  "live_check": false,
+  "concurrency": 200,
+  "hits_per_sec": 5,
+  "query": null,
+  "score_threshold": null,
+  "filter_nonsense_urls": true
+}
 ```
 
-Crawls the URL and returns preprocessed HTML optimized for schema extraction.
+**Parameters:**
+- `root` (required): Root domain or URL to discover from
+- `limit`: Maximum URLs to return (1-10000, default: 1000)
+- `source`: Discovery method - `"sitemap"`, `"cc"` (CommonCrawl), or `"sitemap+cc"` (default)
+- `pattern`: Glob-like URL filter pattern (default: `"*"`)
+- `extract_head`: Extract meta information from HTML head (default: false)
+- `live_check`: Verify URLs are accessible via HEAD request (default: false)
+- `concurrency`: Concurrent requests for live_check (1-5000, default: 200)
+- `hits_per_sec`: Rate limit for requests (0-1000, default: 5)
+- `query`: BM25 search query for filtering URLs (optional)
+- `score_threshold`: Minimum BM25 score (0.0-1.0, optional)
+- `filter_nonsense_urls`: Remove likely invalid URLs (default: true)
 
+**Response:**
+```json
+{
+  "root": "example.com",
+  "count": 245,
+  "urls": ["https://example.com/page1", "https://example.com/page2", ...],
+  "success": true
+}
+```
+
+### Content Extraction Endpoints
+
+#### POST /md
+Generates clean markdown from a URL.
+
+**Request:**
 ```json
 {
   "url": "https://example.com"
 }
 ```
 
-### Screenshot Endpoint
+**Response:** JSON with markdown content
 
+#### POST /html
+Returns preprocessed HTML optimized for schema extraction.
+
+**Request:**
+```json
+{
+  "url": "https://example.com"
+}
 ```
-POST /screenshot
-```
 
-Captures a full-page PNG screenshot of the specified URL.
+**Response:** JSON with cleaned HTML
 
+#### POST /screenshot
+Captures a full-page PNG screenshot (base64-encoded).
+
+**Request:**
 ```json
 {
   "url": "https://example.com",
@@ -362,17 +443,22 @@ Captures a full-page PNG screenshot of the specified URL.
 }
 ```
 
-- `screenshot_wait_for`: Optional delay in seconds before capture (default: 2)
-- `output_path`: Optional path to save the screenshot (recommended)
+**Parameters:**
+- `screenshot_wait_for`: Delay in seconds before capture (default: 2)
+- `output_path`: Optional save path
 
-### PDF Export Endpoint
-
+**Response:**
+```json
+{
+  "success": true,
+  "screenshot": "iVBORw0KGgoAAAANSUhEUg..." // base64 PNG data
+}
 ```
-POST /pdf
-```
 
-Generates a PDF document of the specified URL.
+#### POST /pdf
+Generates a PDF document of the webpage.
 
+**Request:**
 ```json
 {
   "url": "https://example.com",
@@ -380,16 +466,12 @@ Generates a PDF document of the specified URL.
 }
 ```
 
-- `output_path`: Optional path to save the PDF (recommended)
+**Response:** JSON with base64-encoded PDF data
 
-### JavaScript Execution Endpoint
+#### POST /execute_js
+Executes JavaScript on a page and returns results.
 
-```
-POST /execute_js
-```
-
-Executes JavaScript snippets on the specified URL and returns the full crawl result.
-
+**Request:**
 ```json
 {
   "url": "https://example.com",
@@ -400,7 +482,32 @@ Executes JavaScript snippets on the specified URL and returns the full crawl res
 }
 ```
 
-- `scripts`: List of JavaScript snippets to execute sequentially
+**Response:** Full crawl result with script execution results
+
+### Utility Endpoints
+
+#### GET /health
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "timestamp": 1759559440.98,
+  "version": "0.5.1-d1"
+}
+```
+
+#### GET /metrics
+Prometheus metrics for monitoring.
+
+#### GET /schema
+OpenAPI schema for the entire API.
+
+#### GET /ask
+Query the Crawl4AI library documentation and context.
+
+**Parameters:** `?q=your+question`
 
 ---
 
