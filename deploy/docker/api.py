@@ -33,6 +33,7 @@ from crawl4ai.content_filter_strategy import (
 )
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
+from crawl4ai.url_map import map_site
 
 from utils import (
     TaskStatus,
@@ -603,3 +604,41 @@ async def handle_crawl_job(
 
     background_tasks.add_task(_runner)
     return {"task_id": task_id}
+
+
+async def handle_map_request(
+    root: str,
+    limit: int,
+    *,
+    source: str,
+    pattern: str,
+    extract_head: bool,
+    live_check: bool,
+    concurrency: int,
+    hits_per_sec: int,
+    query: Optional[str],
+    score_threshold: Optional[float],
+    filter_nonsense_urls: bool,
+) -> Dict:
+    """Handle URL discovery (Firecrawl Map equivalent)."""
+    try:
+        urls = await map_site(
+            root,
+            limit,
+            source=source,
+            pattern=pattern or "*",
+            extract_head=extract_head,
+            live_check=live_check,
+            concurrency=concurrency,
+            hits_per_sec=hits_per_sec,
+            query=query,
+            score_threshold=score_threshold,
+            filter_nonsense_urls=filter_nonsense_urls,
+        )
+        return {"root": root, "count": len(urls), "urls": urls, "success": True}
+    except Exception as e:
+        logger.error(f"Map error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )

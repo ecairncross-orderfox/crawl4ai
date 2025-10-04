@@ -6,7 +6,6 @@ Features
 --------
 * Common-Crawl streaming via httpx.AsyncClient (HTTP/2, keep-alive)
 * robots.txt → sitemap chain (.gz + nested indexes) via async httpx
-* Per-domain CDX result cache on disk (~/.crawl4ai/<index>_<domain>_<hash>.jsonl)
 * Optional HEAD-only liveness check
 * Optional partial <head> download + meta parsing
 * Global hits-per-second rate-limit via asyncio.Semaphore
@@ -14,7 +13,6 @@ Features
 """
 
 from __future__ import annotations
-import aiofiles
 import asyncio
 import gzip
 import hashlib
@@ -62,9 +60,6 @@ if TYPE_CHECKING:
 
 # ────────────────────────────────────────────────────────────────────────── consts
 COLLINFO_URL = "https://index.commoncrawl.org/collinfo.json"
-# CACHE_DIR = pathlib.Path("~/.crawl4ai").expanduser() # REMOVED: now managed by __init__
-# CACHE_DIR.mkdir(exist_ok=True) # REMOVED: now managed by __init__
-# INDEX_CACHE = CACHE_DIR / "latest_cc_index.txt" # REMOVED: now managed by __init__
 TTL = timedelta(days=7)  # Keeping this constant as it's a seeder-specific TTL
 
 _meta_rx = re.compile(
@@ -202,7 +197,6 @@ class AsyncUrlSeeder:
         logger: Optional[AsyncLoggerBase] = None,  # NEW: Add logger parameter
         # NEW: Add base_directory
         base_directory: Optional[Union[str, pathlib.Path]] = None,
-        cache_root: Optional[Union[str, Path]] = None,
     ):
         self.ttl = ttl
         self._owns_client = client is None  # Track if we created the client
@@ -212,21 +206,10 @@ class AsyncUrlSeeder:
         self.logger = logger  # Store the logger instance
         self.base_directory = pathlib.Path(base_directory or os.getenv(
             "CRAWL4_AI_BASE_DIRECTORY", Path.home()))  # Resolve base_directory
-        self.cache_dir = self.base_directory / ".crawl4ai" / \
-            "seeder_cache"  # NEW: Specific cache dir for seeder
-        self.cache_dir.mkdir(parents=True, exist_ok=True)  # Ensure it exists
-        self.index_cache_path = self.cache_dir / \
-            "latest_cc_index.txt"  # NEW: Index cache path
 
         # defer – grabbing the index inside an active loop blows up
         self.index_id: Optional[str] = None
         self._rate_sem: Optional[asyncio.Semaphore] = None
-
-        # ───────── cache dirs ─────────
-        self.cache_root = Path(os.path.expanduser(
-            cache_root or "~/.cache/url_seeder"))
-        (self.cache_root / "live").mkdir(parents=True, exist_ok=True)
-        (self.cache_root / "head").mkdir(exist_ok=True)
 
     def _log(self, level: str, message: str, tag: str = "URL_SEED", **kwargs: Any):
         """Helper to log messages using the provided logger, if available."""
@@ -238,29 +221,6 @@ class AsyncUrlSeeder:
             # else: # Fallback for unknown level, should not happen with AsyncLoggerBase
             #     print(f"[{tag}] {level.upper()}: {message.format(**kwargs)}")
 
-    # ───────── cache helpers ─────────
-    def _cache_path(self, kind: str, url: str) -> Path:
-        h = hashlib.sha1(url.encode()).hexdigest()
-        return self.cache_root / kind / f"{h}.json"
-
-    async def _cache_get(self, kind: str, url: str) -> Optional[Dict[str, Any]]:
-        p = self._cache_path(kind, url)
-        if not p.exists():
-            return None
-        if time.time()-p.stat().st_mtime > self.ttl.total_seconds():
-            return None
-        try:
-            async with aiofiles.open(p, "r") as f:
-                return json.loads(await f.read())
-        except Exception:
-            return None
-
-    async def _cache_set(self, kind: str, url: str, data: Dict[str, Any]) -> None:
-        try:
-            async with aiofiles.open(self._cache_path(kind, url), "w") as f:
-                await f.write(json.dumps(data, separators=(",", ":")))
-        except Exception:
-            pass
 
     # ─────────────────────────────── discovery entry
 
@@ -708,25 +668,10 @@ class AsyncUrlSeeder:
     # ─────────────────────────────── CC
     async def _from_cc(self, domain: str, pattern: str, force: bool):
         import re
-        digest = hashlib.md5(pattern.encode()).hexdigest()[:8]
 
         # ── normalise for CC   (strip scheme, query, fragment)
         raw = re.sub(r'^https?://', '', domain).split('#',
                                                       1)[0].split('?', 1)[0].lstrip('.')
-
-        # ── sanitize only for cache-file name
-        safe = re.sub('[/?#]+', '_', raw)
-        path = self.cache_dir / f"{self.index_id}_{safe}_{digest}.jsonl"
-
-        if path.exists() and not force:
-            self._log("info", "Loading CC URLs for {domain} from cache: {path}",
-                      params={"domain": domain, "path": path}, tag="URL_SEED")
-            async with aiofiles.open(path, "r") as fp:
-                async for line in fp:
-                    url = line.strip()
-                    if _match(url, pattern):
-                        yield url
-            return
 
         # build CC glob – if a path is present keep it, else add trailing /*
         glob = f"*.{raw}*" if '/' in raw else f"*.{raw}/*"
@@ -739,13 +684,11 @@ class AsyncUrlSeeder:
             try:
                 async with self.client.stream("GET", url) as r:
                     r.raise_for_status()
-                    async with aiofiles.open(path, "w") as fp:
-                        async for line in r.aiter_lines():
-                            rec = json.loads(line)
-                            u = rec["url"]
-                            await fp.write(u+"\n")
-                            if _match(u, pattern):
-                                yield u
+                    async for line in r.aiter_lines():
+                        rec = json.loads(line)
+                        u = rec["url"]
+                        if _match(u, pattern):
+                            yield u
                 return
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 503 and i < len(retries):
@@ -769,22 +712,6 @@ class AsyncUrlSeeder:
         3. Yield only URLs that match `pattern`.
         """
 
-       # ── cache file (same logic as _from_cc)
-        host = re.sub(r'^https?://', '', domain).rstrip('/')
-        host = re.sub('[/?#]+', '_', domain)
-        digest = hashlib.md5(pattern.encode()).hexdigest()[:8]
-        path = self.cache_dir / f"sitemap_{host}_{digest}.jsonl"
-
-        if path.exists() and not force:
-            self._log("info", "Loading sitemap URLs for {d} from cache: {p}",
-                      params={"d": host, "p": str(path)}, tag="URL_SEED")
-            async with aiofiles.open(path, "r") as fp:
-                async for line in fp:
-                    url = line.strip()
-                    if _match(url, pattern):
-                        yield url
-            return
-
         # 1️⃣ direct sitemap probe
         # strip any scheme so we can handle https → http fallback
         host = re.sub(r'^https?://', '', domain).rstrip('/')
@@ -797,11 +724,9 @@ class AsyncUrlSeeder:
                 if sm:
                     self._log("info", "Found sitemap at {url}", params={
                               "url": sm}, tag="URL_SEED")
-                    async with aiofiles.open(path, "w") as fp:
-                        async for u in self._iter_sitemap(sm):
-                            await fp.write(u + "\n")
-                            if _match(u, pattern):
-                                yield u
+                    async for u in self._iter_sitemap(sm):
+                        if _match(u, pattern):
+                            yield u
                     return
 
         # 2️⃣ robots.txt fallback
@@ -820,12 +745,10 @@ class AsyncUrlSeeder:
             return
 
         if sitemap_lines:
-            async with aiofiles.open(path, "w") as fp:
-                for sm in sitemap_lines:
-                    async for u in self._iter_sitemap(sm):
-                        await fp.write(u + "\n")
-                        if _match(u, pattern):
-                            yield u
+            for sm in sitemap_lines:
+                async for u in self._iter_sitemap(sm):
+                    if _match(u, pattern):
+                        yield u
 
     async def _iter_sitemap(self, url: str):
         try:
@@ -971,12 +894,8 @@ class AsyncUrlSeeder:
 
         cache_kind = "head" if extract else "live"
 
-        # ---------- try cache ----------
-        if not (hasattr(self, 'force') and self.force):
-            cached = await self._cache_get(cache_kind, url)
-            if cached:
-                res_list.append(cached)
-                return
+        # ---------- cache removed for stateless operation ----------
+        # Skip cache check completely
 
         if extract:
             self._log("debug", "Fetching head for {url}", params={
@@ -1006,8 +925,7 @@ class AsyncUrlSeeder:
             entry = {"url": url, "status": "unknown", "head_data": {}}
 
         # Add entry to results (scoring will be done later)
-        if live or extract:
-            await self._cache_set(cache_kind, url, entry)
+        # Cache removed for stateless operation
         res_list.append(entry)
 
     async def _head_ok(self, url: str, timeout: int) -> bool:
@@ -1441,20 +1359,14 @@ class AsyncUrlSeeder:
 
     # ─────────────────────────────── index helper
     async def _latest_index(self) -> str:
-        if self.index_cache_path.exists() and (time.time()-self.index_cache_path.stat().st_mtime) < self.ttl.total_seconds():
-            self._log("info", "Loading latest CC index from cache: {path}",
-                      params={"path": self.index_cache_path}, tag="URL_SEED")
-            return self.index_cache_path.read_text().strip()
-
         self._log("info", "Fetching latest Common Crawl index from {url}",
                   params={"url": COLLINFO_URL}, tag="URL_SEED")
         try:
             async with httpx.AsyncClient() as c:
                 j = await c.get(COLLINFO_URL, timeout=10)
-                j.raise_for_status()  # Raise an exception for bad status codes
+                j.raise_for_status()
                 idx = j.json()[0]["id"]
-                self.index_cache_path.write_text(idx)
-                self._log("success", "Successfully fetched and cached CC index: {index_id}",
+                self._log("success", "Successfully fetched CC index: {index_id}",
                           params={"index_id": idx}, tag="URL_SEED")
                 return idx
         except httpx.RequestError as e:

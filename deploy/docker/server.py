@@ -20,7 +20,8 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 from api import (
     handle_markdown_request, handle_llm_qa,
     handle_stream_crawl_request, handle_crawl_request,
-    stream_results
+    stream_results,
+    handle_map_request,
 )
 from schemas import (
     CrawlRequest,
@@ -30,6 +31,7 @@ from schemas import (
     ScreenshotRequest,
     PDFRequest,
     JSEndpointRequest,
+    MapRequest,
 )
 
 from utils import (
@@ -470,6 +472,30 @@ async def crawl_stream(
             "X-Stream-Status": "active",
         },
     )
+
+
+@app.post("/map")
+@limiter.limit(config["rate_limiting"]["default_limit"])
+async def map_endpoint(
+    request: Request,
+    body: MapRequest,
+    _td: Dict = Depends(token_dep),
+):
+    """Discover URLs from a root, returning up to `limit` URLs."""
+    result = await handle_map_request(
+        root=body.root,
+        limit=body.limit,
+        source=body.source,
+        pattern=body.pattern or "*",
+        extract_head=body.extract_head,
+        live_check=body.live_check,
+        concurrency=body.concurrency,
+        hits_per_sec=body.hits_per_sec,
+        query=body.query,
+        score_threshold=body.score_threshold,
+        filter_nonsense_urls=body.filter_nonsense_urls,
+    )
+    return JSONResponse(result)
 
 
 def chunk_code_functions(code_md: str) -> List[str]:

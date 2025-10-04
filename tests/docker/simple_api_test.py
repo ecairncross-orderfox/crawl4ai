@@ -216,6 +216,15 @@ class SimpleApiTester:
         }
         result = self.test_post_endpoint("/execute_js", js_payload)
         self.print_result(result)
+
+        # Test map endpoint (URL discovery)
+        map_payload = {
+            "root": "example.com",
+            "limit": 25,
+            "source": "sitemap+cc"
+        }
+        result = self.test_post_endpoint("/map", map_payload)
+        self.print_result(result)
         
         # Test crawl endpoint
         crawl_payload = {

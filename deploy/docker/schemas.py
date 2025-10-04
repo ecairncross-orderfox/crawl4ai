@@ -40,3 +40,17 @@ class JSEndpointRequest(BaseModel):
         ...,
         description="List of separated JavaScript snippets to execute"
     )
+
+
+class MapRequest(BaseModel):
+    root: str = Field(..., description="Root domain or URL to discover from")
+    limit: int = Field(1000, ge=1, le=10000)
+    source: str = Field("sitemap+cc", description="'sitemap', 'cc', or 'sitemap+cc'")
+    pattern: Optional[str] = Field("*", description="Glob-like URL include pattern")
+    extract_head: bool = False
+    live_check: bool = False
+    concurrency: int = Field(200, ge=1, le=5000)
+    hits_per_sec: int = Field(5, ge=0, le=1000)
+    query: Optional[str] = None
+    score_threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    filter_nonsense_urls: bool = True

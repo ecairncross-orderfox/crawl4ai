@@ -21,7 +21,23 @@
       "Bash(curl:*)",
       "Bash(docker compose:*)",
       "Bash(./test-final-integration.sh:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(az account show:*)",
+      "Bash(az resource list:*)",
+      "Bash(az containerapp env create:*)",
+      "Bash(az containerapp:*)",
+      "WebSearch",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "WebFetch(domain:docs.crawl4ai.com)",
+      "Bash(pip install:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(playwright install-deps:*)",
+      "Bash(playwright install:*)",
+      "Bash(cat:*)",
+      "Bash(docker buildx build:*)",
+      "Bash(az acr login:*)",
+      "Bash(docker tag:*)"
     ]
   },
   "enableAllProjectMcpServers": false

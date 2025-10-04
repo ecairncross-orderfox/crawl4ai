@@ -105,6 +105,7 @@ from .utils import (
     start_colab_display_server,
     setup_colab_environment
 )
+from .url_map import map_site
 
 __all__ = [
     "AsyncLoggerBase",
@@ -183,6 +184,7 @@ __all__ = [
     "ProxyConfig",
     "start_colab_display_server",
     "setup_colab_environment",
+    "map_site",
     # C4A Script additions
     "c4a_compile",
     "c4a_validate", 

@@ -162,8 +162,12 @@ RUN crawl4ai-setup
 RUN playwright install --with-deps
 
 RUN mkdir -p /home/appuser/.cache/ms-playwright \
-    && cp -r /root/.cache/ms-playwright/chromium-* /home/appuser/.cache/ms-playwright/ \
-    && chown -R appuser:appuser /home/appuser/.cache/ms-playwright
+    && mkdir -p /tmp/.cache/ms-playwright \
+    && cp -r /root/.cache/ms-playwright/* /home/appuser/.cache/ms-playwright/ \
+    && cp -r /root/.cache/ms-playwright/* /tmp/.cache/ms-playwright/ \
+    && mkdir -p /home/appuser/.cache/url_seeder \
+    && chown -R appuser:appuser /home/appuser/.cache \
+    && chmod -R 755 /tmp/.cache
 
 RUN crawl4ai-doctor
 
